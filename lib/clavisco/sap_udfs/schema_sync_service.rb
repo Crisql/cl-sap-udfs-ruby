@@ -14,6 +14,15 @@ module Clavisco
     # The only rule the tool applies internally is sending EditSize alongside
     # Size on PATCH, because SAP silently ignores Size-only updates.
     #
+    # A schema can target either:
+    # - a User-Defined Table (default, `"IsUDT" => true` or the key absent):
+    #   the tool creates the UDT if missing and queries/creates UDFs under
+    #   the "@table_name" SAP naming convention.
+    # - a native SAP table (`"IsUDT" => false`, e.g. OCRD, OITM, ORDR):
+    #   the tool never creates the table and never prefixes the name with "@".
+    #   `table_description` / `table_type` are irrelevant in this case and are
+    #   not required by validation.
+    #
     # Supports these actions per UDF:
     # - :created  — field did not exist, was created
     # - :exists   — field exists and matches schema (no changes)
@@ -48,15 +57,17 @@ module Clavisco
         schema = load_schema(schema_name)
         result = { table: nil, columns: [] }
 
-        unless @client.udt_exists?(schema["table_name"])
+        if !udt?(schema)
+          result[:table] = :native
+        elsif @client.udt_exists?(schema["table_name"])
+          result[:table] = :exists
+        else
           @client.create_udt(schema["table_name"], schema["table_description"], schema["table_type"] || "bott_NoObject")
           result[:table] = :created
           log(:info, "Created UDT: #{schema['table_name']}")
-        else
-          result[:table] = :exists
         end
 
-        udt_table = "@#{schema['table_name']}"
+        udt_table = sap_table_name(schema)
 
         schema["columns"].each do |col|
           current_udf = get_udf_metadata(udt_table, col["Name"])
@@ -102,10 +113,15 @@ module Clavisco
         schema = load_schema(schema_name)
         changes = { table: nil, columns: [] }
 
-        table_exists = @client.udt_exists?(schema["table_name"])
-        changes[:table] = table_exists ? :exists : :will_create
+        if !udt?(schema)
+          changes[:table] = :native
+          table_exists = true
+        else
+          table_exists = @client.udt_exists?(schema["table_name"])
+          changes[:table] = table_exists ? :exists : :will_create
+        end
 
-        udt_table = "@#{schema['table_name']}"
+        udt_table = sap_table_name(schema)
         schema["columns"].each do |col|
           if table_exists
             current_udf = get_udf_metadata(udt_table, col["Name"])
@@ -129,6 +145,18 @@ module Clavisco
       end
 
       private
+
+      # True when the schema targets a native SAP table (OCRD, OITM, ORDR, ...)
+      # instead of a User-Defined Table.
+      def udt?(schema)
+        schema.key?("IsUDT") ? schema["IsUDT"] == true : true
+      end
+
+      # SAP-facing table name used in UserFieldsMD queries and create_udf calls.
+      # UDTs use the "@" prefix convention; native tables are referenced as-is.
+      def sap_table_name(schema)
+        udt?(schema) ? "@#{schema['table_name']}" : schema["table_name"]
+      end
 
       # Fetch current UDF metadata from SAP (returns hash or nil)
       def get_udf_metadata(udt_table, field_name)
@@ -280,7 +308,10 @@ module Clavisco
       def validate_schema!(schema, file)
         errors = []
         errors << "table_name is required" unless schema["table_name"].to_s.strip != ""
-        errors << "table_description is required" unless schema["table_description"].to_s.strip != ""
+
+        if udt?(schema)
+          errors << "table_description is required" unless schema["table_description"].to_s.strip != ""
+        end
 
         (schema["columns"] || []).each_with_index do |col, i|
           label = col["Name"] || "columns[#{i}]"

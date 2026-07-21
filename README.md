@@ -35,9 +35,29 @@ git submodule add git@bitbucket.org:clavisco/cl-sap-udfs-ruby.git vendor/clavisc
   "table_description": "EMA - Log Events",
   "table_type": "bott_NoObject",
   "columns": [
-    { "name": "Event", "type": "db_Alpha", "size": 254 },
-    { "name": "Detail", "type": "db_Memo" },
-    { "name": "CreatedDate", "type": "db_Date" }
+    { "Name": "Event", "Description": "Nombre del evento", "Type": "db_Alpha", "SubType": "st_None", "Size": 254, "Mandatory": "tNO" },
+    { "Name": "Detail", "Description": "Detalle del evento", "Type": "db_Memo", "SubType": "st_None", "Mandatory": "tNO" },
+    { "Name": "CreatedDate", "Description": "Fecha de creación", "Type": "db_Date", "SubType": "st_None", "Mandatory": "tNO" }
+  ]
+}
+```
+
+### Tabla nativa de SAP (OCRD, OITM, ORDR, ...)
+
+Por defecto un schema describe una UDT (`"IsUDT": true`, o directamente sin la
+clave — es el default). Para agregar un UDF sobre una tabla **nativa** de SAP en
+vez de crear una UDT propia, marcá el schema con `"IsUDT": false`. En ese caso la
+herramienta **no** crea la tabla ni usa el prefijo `@`, y `table_description`/
+`table_type` no aplican:
+
+```json
+// config/sap_schemas/ocrd_loyalty_points.json
+{
+  "table_name": "OCRD",
+  "IsUDT": false,
+  "columns": [
+    { "Name": "LoyaltyPoints", "Description": "Puntos de lealtad",
+      "Type": "db_Numeric", "SubType": "st_None", "Mandatory": "tNO" }
   ]
 }
 ```
