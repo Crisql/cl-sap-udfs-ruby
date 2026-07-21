@@ -38,7 +38,7 @@ class SchemaSyncServiceTest < Minitest::Test
 
     assert_equal 1, @client.calls(:create_udf).size
     create_udf_call = @client.calls(:create_udf).first
-    assert_equal "CL_TEST", create_udf_call.args[0], "create_udf should receive the bare table name, same as before this change"
+    assert_equal "@CL_TEST", create_udf_call.args[0], "create_udf must receive the already-prefixed name, same as the get lookup uses"
 
     get_call = @client.calls(:get).first
     assert_includes get_call.kwargs[:params]["$filter"], "@CL_TEST",

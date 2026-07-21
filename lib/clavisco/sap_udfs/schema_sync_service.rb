@@ -79,7 +79,7 @@ module Clavisco
           else
             # Field does not exist — create it
             @client.create_udf(
-              schema["table_name"],
+              udt_table,
               field_name: col["Name"],
               description: col["Description"],
               type: col["Type"],
