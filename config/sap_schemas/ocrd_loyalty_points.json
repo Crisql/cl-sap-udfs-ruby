@@ -1,0 +1,8 @@
+{
+  "table_name": "OCRD",
+  "IsUDT": false,
+  "columns": [
+    { "Name": "LoyaltyPoints", "Description": "Puntos de lealtad",
+      "Type": "db_Numeric", "SubType": "st_None", "Mandatory": "tNO" }
+  ]
+}
