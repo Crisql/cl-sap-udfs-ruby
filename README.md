@@ -33,14 +33,17 @@ git submodule add git@bitbucket.org:clavisco/cl-sap-udfs-ruby.git vendor/clavisc
 
 ### Definir un schema (JSON)
 
-Por defecto un schema describe una **UDT** (`"IsUDT": true`, o directamente sin
-la clave — es el default). El `table_name` debe llevar el prefijo `@` **escrito
-por vos** — la herramienta no lo agrega ni lo adivina, solo valida que esté:
+`IsUDT` es **obligatorio** en todo schema (`true` o `false`, sin default) — así,
+si alguien solo se acuerda de que "hay que ponerle `@`" y se olvida de esto,
+la validación falla altiro en vez de terminar creando una UDT de más por error.
+Para una **UDT** (`"IsUDT": true`), el `table_name` debe llevar el prefijo `@`
+**escrito por vos** — la herramienta no lo agrega ni lo adivina, solo valida que esté:
 
 ```json
 // config/sap_schemas/log_events.json
 {
   "table_name": "@CL_EMA_LOG_EVENTS",
+  "IsUDT": true,
   "table_description": "EMA - Log Events",
   "table_type": "bott_NoObject",
   "columns": [
@@ -58,8 +61,9 @@ UDFs, necesitan el `@`. Por eso el schema ya lo trae escrito así.)
 ### Tabla nativa de SAP (OCRD, OITM, ORDR, ...)
 
 Para agregar un UDF sobre una tabla **nativa** de SAP en vez de crear una UDT
-propia, marcá el schema con `"IsUDT": false` y escribí el `table_name` **sin**
-`@` (es un error de validación si lo lleva). En ese caso la herramienta **no**
+propia, marcá el schema con `"IsUDT": false` (obligatorio, igual que en el caso
+UDT) y escribí el `table_name` **sin** `@` (es un error de validación si lo
+lleva). En ese caso la herramienta **no**
 crea la tabla, y `table_description`/`table_type` no aplican:
 
 ```json

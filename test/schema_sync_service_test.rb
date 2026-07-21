@@ -24,6 +24,7 @@ class SchemaSyncServiceTest < Minitest::Test
   def test_udt_schema_creates_table_and_field_when_missing
     write_schema(@dir, "loyalty_udt", {
       "table_name" => "@CL_TEST",
+      "IsUDT" => true,
       "table_description" => "Test UDT",
       "table_type" => "bott_NoObject",
       "columns" => [
@@ -58,6 +59,7 @@ class SchemaSyncServiceTest < Minitest::Test
     @client.stub_table_exists("CL_TEST", true)
     write_schema(@dir, "loyalty_udt", {
       "table_name" => "@CL_TEST",
+      "IsUDT" => true,
       "table_description" => "Test UDT",
       "columns" => [
         { "Name" => "Points", "Description" => "Loyalty points", "Type" => "db_Numeric",
@@ -167,6 +169,7 @@ class SchemaSyncServiceTest < Minitest::Test
   def test_validation_still_requires_table_description_for_udt
     write_schema(@dir, "no_description", {
       "table_name" => "@CL_TEST",
+      "IsUDT" => true,
       "columns" => [
         { "Name" => "Points", "Description" => "Loyalty points", "Type" => "db_Numeric",
           "SubType" => "st_None", "Mandatory" => "tNO" }
@@ -180,6 +183,7 @@ class SchemaSyncServiceTest < Minitest::Test
   def test_validation_rejects_udt_schema_without_at_prefix
     write_schema(@dir, "missing_at", {
       "table_name" => "CL_TEST",
+      "IsUDT" => true,
       "table_description" => "Test UDT",
       "columns" => [
         { "Name" => "Points", "Description" => "Loyalty points", "Type" => "db_Numeric",
@@ -203,5 +207,18 @@ class SchemaSyncServiceTest < Minitest::Test
 
     error = assert_raises(RuntimeError) { service.sync("extra_at") }
     assert_includes error.message, "must NOT start with '@'"
+  end
+  def test_validation_requires_isudt_key
+    write_schema(@dir, "no_isudt", {
+      "table_name" => "@CL_TEST",
+      "table_description" => "Test UDT",
+      "columns" => [
+        { "Name" => "Points", "Description" => "Loyalty points", "Type" => "db_Numeric",
+          "SubType" => "st_None", "Mandatory" => "tNO" }
+      ]
+    })
+
+    error = assert_raises(RuntimeError) { service.sync("no_isudt") }
+    assert_includes error.message, "IsUDT is required"
   end
 end

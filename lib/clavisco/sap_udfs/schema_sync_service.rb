@@ -19,8 +19,9 @@ module Clavisco
     # exact UserTablesMD/UserFieldsMD resources and bodies itself — it does not
     # rely on any UDT/UDF-aware helper on the client.
     #
-    # A schema can target either:
-    # - a User-Defined Table (default, `"IsUDT" => true` or the key absent):
+    # `IsUDT` is required in every schema — true or false, no default. A
+    # schema can target either:
+    # - a User-Defined Table (`"IsUDT" => true`):
     #   the tool creates the UDT if missing and queries/creates UDFs under it.
     #   `table_name` must already include the "@" SAP prefix (e.g. "@CL_TEST")
     #   — the developer writes it, this service only validates it's there.
@@ -28,6 +29,12 @@ module Clavisco
     #   the tool never creates the table. `table_name` must NOT have the "@"
     #   prefix (e.g. "OCRD"). `table_description` / `table_type` are irrelevant
     #   in this case and are not required by validation.
+    #
+    # No default is provided on purpose: a schema author who only remembers
+    # "table_name needs the @" and forgets IsUDT could otherwise silently end
+    # up creating a bogus UDT for what was meant to be a native table (e.g.
+    # writing "@OCRD" with IsUDT defaulting to true). Requiring the key means
+    # that mistake fails validation immediately instead of creating a table.
     #
     # Supports these actions per UDF:
     # - :created  — field did not exist, was created
@@ -146,10 +153,12 @@ module Clavisco
 
       private
 
-      # True when the schema targets a User-Defined Table (the default).
+      # True when the schema targets a User-Defined Table.
       # False means a native SAP table (OCRD, OITM, ORDR, ...).
+      # No default — validate_schema! requires the key to be present, so this
+      # is only ever called after validation has already confirmed it's there.
       def udt?(schema)
-        schema.key?("IsUDT") ? schema["IsUDT"] == true : true
+        schema["IsUDT"] == true
       end
 
       # table_name without the "@" prefix — only meaningful for UDT schemas,
@@ -346,13 +355,17 @@ module Clavisco
         errors = []
         errors << "table_name is required" unless schema["table_name"].to_s.strip != ""
 
-        if udt?(schema)
-          errors << "table_description is required" unless schema["table_description"].to_s.strip != ""
-          unless schema["table_name"].to_s.start_with?("@")
-            errors << "table_name must start with '@' when IsUDT is true (or absent) — e.g. \"@#{schema['table_name']}\""
+        unless [true, false].include?(schema["IsUDT"])
+          errors << "IsUDT is required and must be true or false — no default, be explicit about UDT vs native table"
+        else
+          if udt?(schema)
+            errors << "table_description is required" unless schema["table_description"].to_s.strip != ""
+            unless schema["table_name"].to_s.start_with?("@")
+              errors << "table_name must start with '@' when IsUDT is true — e.g. \"@#{schema['table_name']}\""
+            end
+          elsif schema["table_name"].to_s.start_with?("@")
+            errors << "table_name must NOT start with '@' when IsUDT is false (native table)"
           end
-        elsif schema["table_name"].to_s.start_with?("@")
-          errors << "table_name must NOT start with '@' when IsUDT is false (native table)"
         end
 
         (schema["columns"] || []).each_with_index do |col, i|
