@@ -11,17 +11,23 @@ module Clavisco
     # Name, Description, Type, SubType, Size, Mandatory, DefaultValue.
     # The dev writes values exactly as SAP expects them — no translations.
     #
-    # The only rule the tool applies internally is sending EditSize alongside
-    # Size on PATCH, because SAP silently ignores Size-only updates.
+    # The only rule the tool applies internally on updates is sending EditSize
+    # alongside Size on PATCH, because SAP silently ignores Size-only updates.
+    #
+    # `client` is expected to be a pure Service Layer driver: get/post/patch/
+    # delete only (see Clavisco::ServiceLayer::Client). This service builds the
+    # exact UserTablesMD/UserFieldsMD resources and bodies itself — it does not
+    # rely on any UDT/UDF-aware helper on the client.
     #
     # A schema can target either:
     # - a User-Defined Table (default, `"IsUDT" => true` or the key absent):
-    #   the tool creates the UDT if missing and queries/creates UDFs under
-    #   the "@table_name" SAP naming convention.
+    #   the tool creates the UDT if missing and queries/creates UDFs under it.
+    #   `table_name` must already include the "@" SAP prefix (e.g. "@CL_TEST")
+    #   — the developer writes it, this service only validates it's there.
     # - a native SAP table (`"IsUDT" => false`, e.g. OCRD, OITM, ORDR):
-    #   the tool never creates the table and never prefixes the name with "@".
-    #   `table_description` / `table_type` are irrelevant in this case and are
-    #   not required by validation.
+    #   the tool never creates the table. `table_name` must NOT have the "@"
+    #   prefix (e.g. "OCRD"). `table_description` / `table_type` are irrelevant
+    #   in this case and are not required by validation.
     #
     # Supports these actions per UDF:
     # - :created  — field did not exist, was created
@@ -57,39 +63,33 @@ module Clavisco
         schema = load_schema(schema_name)
         result = { table: nil, columns: [] }
 
-        if !udt?(schema)
-          result[:table] = :native
-        elsif @client.udt_exists?(schema["table_name"])
-          result[:table] = :exists
+        if udt?(schema)
+          bare_name = bare_table_name(schema)
+          if table_exists?(bare_name)
+            result[:table] = :exists
+          else
+            create_table(bare_name, schema["table_description"], schema["table_type"] || "bott_NoObject")
+            result[:table] = :created
+            log(:info, "Created UDT: #{bare_name}")
+          end
         else
-          @client.create_udt(schema["table_name"], schema["table_description"], schema["table_type"] || "bott_NoObject")
-          result[:table] = :created
-          log(:info, "Created UDT: #{schema['table_name']}")
+          result[:table] = :native
         end
 
-        udt_table = sap_table_name(schema)
+        table_name = schema["table_name"]
 
         schema["columns"].each do |col|
-          current_udf = get_udf_metadata(udt_table, col["Name"])
+          current_udf = get_udf_metadata(table_name, col["Name"])
 
           if current_udf
             # Field exists — check if update is needed
-            col_result = check_and_update_udf(current_udf, col, udt_table)
+            col_result = check_and_update_udf(current_udf, col, table_name)
             result[:columns] << col_result
           else
             # Field does not exist — create it
-            @client.create_udf(
-              udt_table,
-              field_name: col["Name"],
-              description: col["Description"],
-              type: col["Type"],
-              sub_type: col["SubType"],
-              size: col["Size"],
-              mandatory: col["Mandatory"],
-              default_value: col["DefaultValue"]
-            )
+            create_udf(table_name, col)
             result[:columns] << { name: col["Name"], action: :created }
-            log(:info, "Created UDF: #{udt_table}.U_#{col['Name']}")
+            log(:info, "Created UDF: #{table_name}.U_#{col['Name']}")
           end
         end
 
@@ -113,18 +113,18 @@ module Clavisco
         schema = load_schema(schema_name)
         changes = { table: nil, columns: [] }
 
-        if !udt?(schema)
-          changes[:table] = :native
-          table_exists = true
+        if udt?(schema)
+          table_present = table_exists?(bare_table_name(schema))
+          changes[:table] = table_present ? :exists : :will_create
         else
-          table_exists = @client.udt_exists?(schema["table_name"])
-          changes[:table] = table_exists ? :exists : :will_create
+          changes[:table] = :native
+          table_present = true
         end
 
-        udt_table = sap_table_name(schema)
+        table_name = schema["table_name"]
         schema["columns"].each do |col|
-          if table_exists
-            current_udf = get_udf_metadata(udt_table, col["Name"])
+          if table_present
+            current_udf = get_udf_metadata(table_name, col["Name"])
             if current_udf
               # Field exists — check what would change
               diffs = compute_diffs(current_udf, col)
@@ -146,22 +146,45 @@ module Clavisco
 
       private
 
-      # True when the schema targets a native SAP table (OCRD, OITM, ORDR, ...)
-      # instead of a User-Defined Table.
+      # True when the schema targets a User-Defined Table (the default).
+      # False means a native SAP table (OCRD, OITM, ORDR, ...).
       def udt?(schema)
         schema.key?("IsUDT") ? schema["IsUDT"] == true : true
       end
 
-      # SAP-facing table name used in UserFieldsMD queries and create_udf calls.
-      # UDTs use the "@" prefix convention; native tables are referenced as-is.
-      def sap_table_name(schema)
-        udt?(schema) ? "@#{schema['table_name']}" : schema["table_name"]
+      # table_name without the "@" prefix — only meaningful for UDT schemas,
+      # needed because UserTablesMD (create/exists) always uses the bare name;
+      # only references to it in UserFieldsMD keep the "@".
+      def bare_table_name(schema)
+        schema["table_name"].to_s.delete_prefix("@")
       end
 
-      # Fetch current UDF metadata from SAP (returns hash or nil)
-      def get_udf_metadata(udt_table, field_name)
+      # ── Raw Service Layer calls (UserTablesMD) ──
+      # The client is a pure driver — this service builds the exact resource/body.
+
+      def table_exists?(bare_name)
+        @client.get("UserTablesMD('#{bare_name}')")
+        true
+      rescue Clavisco::ServiceLayer::Client::NotFoundError
+        false
+      end
+
+      def create_table(bare_name, description, table_type)
+        @client.post("UserTablesMD", body: {
+          TableName: bare_name,
+          TableDescription: description,
+          TableType: table_type
+        })
+      end
+
+      # ── Raw Service Layer calls (UserFieldsMD) ──
+
+      # Fetch current UDF metadata from SAP (returns hash or nil).
+      # table_name is used exactly as given in the schema (already "@"-prefixed
+      # for UDTs, bare for native tables) — no naming decision made here.
+      def get_udf_metadata(table_name, field_name)
         filter = Clavisco::ServiceLayer::OdataFilter.and(
-          Clavisco::ServiceLayer::OdataFilter.eq("TableName", udt_table),
+          Clavisco::ServiceLayer::OdataFilter.eq("TableName", table_name),
           Clavisco::ServiceLayer::OdataFilter.eq("Name", field_name)
         )
         result = @client.get("UserFieldsMD", params: { "$filter" => filter })
@@ -172,9 +195,23 @@ module Clavisco
         nil
       end
 
+      def create_udf(table_name, col)
+        body = {
+          TableName: table_name,
+          Name: col["Name"],
+          Description: col["Description"],
+          Type: col["Type"],
+          SubType: col["SubType"],
+          Mandatory: col["Mandatory"]
+        }
+        body[:Size] = col["Size"] if col["Size"]
+        body[:DefaultValue] = col["DefaultValue"] if col["DefaultValue"]
+        @client.post("UserFieldsMD", body: body)
+      end
+
       # Compare current SAP state with desired schema and attempt updates.
       # Returns { name:, action:, updates: [{ property:, old:, new:, status:, error: }] }
-      def check_and_update_udf(current_udf, col, udt_table)
+      def check_and_update_udf(current_udf, col, table_name)
         diffs = compute_diffs(current_udf, col)
 
         if diffs.empty?
@@ -182,14 +219,14 @@ module Clavisco
         end
 
         # SAP UserFieldsMD uses composite key: TableName + FieldID
-        table_name = current_udf["TableName"]
+        udf_table_name = current_udf["TableName"]
         field_id = current_udf["FieldID"]
         updates = []
 
         diffs.each do |diff_item|
           body = build_update_body(diff_item)
           begin
-            resource = "UserFieldsMD(TableName='#{table_name}',FieldID=#{field_id})"
+            resource = "UserFieldsMD(TableName='#{udf_table_name}',FieldID=#{field_id})"
             @client.patch(resource, body: body)
             updates << {
               property: diff_item[:property],
@@ -197,7 +234,7 @@ module Clavisco
               new_value: diff_item[:new_value],
               status: :success
             }
-            log(:info, "Updated UDF #{udt_table}.U_#{col['Name']}.#{diff_item[:property]}: '#{diff_item[:old_value]}' → '#{diff_item[:new_value]}'")
+            log(:info, "Updated UDF #{table_name}.U_#{col['Name']}.#{diff_item[:property]}: '#{diff_item[:old_value]}' → '#{diff_item[:new_value]}'")
           rescue Clavisco::ServiceLayer::Client::ServiceLayerError => e
             updates << {
               property: diff_item[:property],
@@ -206,7 +243,7 @@ module Clavisco
               status: :failed,
               error: e.sap_message || e.message
             }
-            log(:warn, "Failed to update UDF #{udt_table}.U_#{col['Name']}.#{diff_item[:property]}: #{e.message}")
+            log(:warn, "Failed to update UDF #{table_name}.U_#{col['Name']}.#{diff_item[:property]}: #{e.message}")
           end
         end
 
@@ -311,6 +348,11 @@ module Clavisco
 
         if udt?(schema)
           errors << "table_description is required" unless schema["table_description"].to_s.strip != ""
+          unless schema["table_name"].to_s.start_with?("@")
+            errors << "table_name must start with '@' when IsUDT is true (or absent) — e.g. \"@#{schema['table_name']}\""
+          end
+        elsif schema["table_name"].to_s.start_with?("@")
+          errors << "table_name must NOT start with '@' when IsUDT is false (native table)"
         end
 
         (schema["columns"] || []).each_with_index do |col, i|

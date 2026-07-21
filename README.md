@@ -20,6 +20,11 @@ con riesgo de nombres inconsistentes, campos faltantes, y errores silenciosos.
 | JSON Schemas | Definición declarativa de UDTs/UDFs en archivos JSON | Config files |
 | Rake tasks | `sap:schema:sync`, `sap:schema:diff` — CLI para ejecutar sincronización | Manual scripts |
 
+`SchemaSyncService` construye directamente los `get`/`post`/`patch` contra
+`UserTablesMD`/`UserFieldsMD` — el `Client` de `cl-sap-servicelayer-ruby` es un
+driver puro (sin métodos `create_udt`/`create_udf`/etc.), así que toda la
+convención de nombres de SAP (el `@` de las UDTs) vive únicamente acá.
+
 ## Uso como submódulo
 
 ```bash
@@ -28,10 +33,14 @@ git submodule add git@bitbucket.org:clavisco/cl-sap-udfs-ruby.git vendor/clavisc
 
 ### Definir un schema (JSON)
 
+Por defecto un schema describe una **UDT** (`"IsUDT": true`, o directamente sin
+la clave — es el default). El `table_name` debe llevar el prefijo `@` **escrito
+por vos** — la herramienta no lo agrega ni lo adivina, solo valida que esté:
+
 ```json
 // config/sap_schemas/log_events.json
 {
-  "table_name": "CL_EMA_LOG_EVENTS",
+  "table_name": "@CL_EMA_LOG_EVENTS",
   "table_description": "EMA - Log Events",
   "table_type": "bott_NoObject",
   "columns": [
@@ -42,13 +51,16 @@ git submodule add git@bitbucket.org:clavisco/cl-sap-udfs-ruby.git vendor/clavisc
 }
 ```
 
+(La UDT se crea con el nombre sin `@`, `CL_EMA_LOG_EVENTS` — SAP le agrega el
+prefijo internamente. Solo las referencias posteriores, como agregar/consultar
+UDFs, necesitan el `@`. Por eso el schema ya lo trae escrito así.)
+
 ### Tabla nativa de SAP (OCRD, OITM, ORDR, ...)
 
-Por defecto un schema describe una UDT (`"IsUDT": true`, o directamente sin la
-clave — es el default). Para agregar un UDF sobre una tabla **nativa** de SAP en
-vez de crear una UDT propia, marcá el schema con `"IsUDT": false`. En ese caso la
-herramienta **no** crea la tabla ni usa el prefijo `@`, y `table_description`/
-`table_type` no aplican:
+Para agregar un UDF sobre una tabla **nativa** de SAP en vez de crear una UDT
+propia, marcá el schema con `"IsUDT": false` y escribí el `table_name` **sin**
+`@` (es un error de validación si lo lleva). En ese caso la herramienta **no**
+crea la tabla, y `table_description`/`table_type` no aplican:
 
 ```json
 // config/sap_schemas/ocrd_loyalty_points.json
