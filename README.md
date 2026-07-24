@@ -12,26 +12,22 @@ estandarizado y declarativo — no código ad-hoc en cada producto.
 Sin este submódulo, cada desarrollador escribiría su propia lógica para crear UDTs,
 con riesgo de nombres inconsistentes, campos faltantes, y errores silenciosos.
 
-## ¿Qué ofrece?
+## Cómo se usa (la única interfaz)
 
-| Componente | Descripción | Equivalente .NET |
-|------------|-------------|------------------|
-| `SchemaSyncService` | Lee JSONs declarativos, compara contra SAP, crea tablas/campos faltantes | `CL.UDFS` sync logic |
-| JSON Schemas | Definición declarativa de UDTs/UDFs en archivos JSON | Config files |
-| `MultiCompanySync` | Corre el sync/diff contra N compañías (un `connections.json`), aislando fallos por compañía | — |
-| `Lock` | Registro de qué schemas quedaron 100% sincronizados (todo-o-nada) | — |
-| `TestDataHelper` | Query/insert de filas en UDTs (plomería, sin datos propios) | — |
-| Rake tasks | `sap:schema:sync`, `sap:schema:diff`, `sap:schema:sync_one`, `sap:schema:check_lock`, `sap:test_data:seed`, `sap:test_data:query` | Manual scripts |
+Hay **una sola forma** de correr esto: rake tasks que reciben la ruta a un
+archivo JSON de conexiones. Ese JSON es un arreglo — **1 elemento si el
+producto es mono-compañía, N si el cliente tiene varias compañías SAP**. No
+hay un "modo simple" y un "modo multi-compañía" aparte: siempre es el mismo
+comando, y lo único que cambia es cuántas entradas tiene el arreglo.
+
+```bash
+rake "sap:schema:sync[/ruta/a/connections.json]"
+```
 
 La herramienta es **agnóstica al producto**: no sabe qué es una "compañía", un
-"cliente" ni un "branch". Solo recibe los datos de conexión que necesita — de
-dónde salen esos datos (una tabla `Company`, un `.env`, lo que sea) es decisión
-exclusiva de quien la consume.
-
-`SchemaSyncService` construye directamente los `get`/`post`/`patch` contra
-`UserTablesMD`/`UserFieldsMD` — el `Client` de `cl-sap-servicelayer-ruby` es un
-driver puro (sin métodos `create_udt`/`create_udf`/etc.), así que toda la
-convención de nombres de SAP (el `@` de las UDTs) vive únicamente acá.
+"cliente" ni un "branch". Solo lee ese JSON y corre. De dónde sale ese JSON
+(a mano, generado desde una tabla `Company`, inyectado por CI/CD) es decisión
+exclusiva de quien la consume — ver [El archivo de conexiones](#el-archivo-de-conexiones).
 
 ## Uso como submódulo
 
@@ -39,7 +35,19 @@ convención de nombres de SAP (el `@` de las UDTs) vive únicamente acá.
 git submodule add git@bitbucket.org:clavisco/cl-sap-udfs-ruby.git vendor/clavisco/sap_udfs
 ```
 
-### Definir un schema (JSON)
+Cargar las rake tasks desde el Rakefile del producto:
+
+```ruby
+# Rakefile del producto (ej. EMA)
+Dir[Rails.root.join("vendor/clavisco/sap_udfs/lib/tasks/*.rake")].each { |f| load f }
+```
+
+El producto debe tener `Clavisco::ServiceLayer::Client` ya cargado (este gem
+no depende de `service_layer` directamente).
+
+## Definir un schema (JSON)
+
+Los schemas viven en `config/sap_schemas/*.json` de cada producto consumidor.
 
 `IsUDT` es **obligatorio** en todo schema (`true` o `false`, sin default) — así,
 si alguien solo se acuerda de que "hay que ponerle `@`" y se olvida de esto,
@@ -66,12 +74,10 @@ Para una **UDT** (`"IsUDT": true`), el `table_name` debe llevar el prefijo `@`
 prefijo internamente. Solo las referencias posteriores, como agregar/consultar
 UDFs, necesitan el `@`. Por eso el schema ya lo trae escrito así.)
 
-### Tabla nativa de SAP (OCRD, OITM, ORDR, ...)
-
-Para agregar un UDF sobre una tabla **nativa** de SAP en vez de crear una UDT
-propia, marcá el schema con `"IsUDT": false` (obligatorio, igual que en el caso
-UDT) y escribí el `table_name` **sin** `@` (es un error de validación si lo
-lleva). En ese caso la herramienta **no**
+Para agregar un UDF sobre una tabla **nativa** de SAP (OCRD, OITM, ORDR, ...)
+en vez de crear una UDT propia, marcá el schema con `"IsUDT": false`
+(obligatorio, igual que en el caso UDT) y escribí el `table_name` **sin** `@`
+(es un error de validación si lo lleva). En ese caso la herramienta **no**
 crea la tabla, y `table_description`/`table_type` no aplican:
 
 ```json
@@ -86,28 +92,12 @@ crea la tabla, y `table_description`/`table_type` no aplican:
 }
 ```
 
-### Sincronizar (una sola conexión, uso directo en Ruby)
+## El archivo de conexiones
 
-```ruby
-client = Clavisco::ServiceLayer::Client.new(...)
-service = Clavisco::SapUdfs::SchemaSyncService.new(client)
-
-# Dry-run
-service.diff_all  # → muestra qué se crearía
-
-# Aplicar
-service.sync_all  # → crea tablas/campos faltantes
-
-# Una sola tabla
-service.sync("log_events")
-```
-
-### Multi-compañía: el archivo de conexiones
-
-Un mismo cliente puede tener varias bases de datos (compañías SAP) para el
-mismo producto. Las rake tasks no reciben un `Client` ya armado ni saben nada
-de "cliente" o "compañía" — reciben la **ruta a un JSON** con un arreglo de
-conexiones, uno por compañía a verificar (1 elemento si es mono-compañía):
+Es el único input que recibe la herramienta para saber contra qué SAP correr:
+un arreglo JSON, un objeto por compañía. **1 entrada = mono-compañía. N
+entradas = un cliente con N compañías.** Es el mismo arreglo, el mismo
+comando, la misma validación — no cambia nada más que el tamaño.
 
 ```json
 // connections.json — NUNCA se commitea (tiene credenciales reales)
@@ -132,29 +122,19 @@ propio `.gitignore`, o mejor aún, un secreto inyectado por el pipeline de
 CI/CD al momento de build/deploy de ese branch) — no al submódulo, que es
 código compartido entre clientes.
 
-### Rake tasks
-
-Hay que cargar las tasks del submódulo desde el Rakefile del producto:
-
-```ruby
-# Rakefile del producto (ej. EMA)
-Dir[Rails.root.join("vendor/clavisco/sap_udfs/lib/tasks/*.rake")].each { |f| load f }
-```
-
-El producto debe tener `Clavisco::ServiceLayer::Client` ya cargado (este gem
-no depende de `service_layer` directamente).
+## Rake tasks
 
 ```bash
-# Preview (dry-run, no escribe nada)
+# Preview (dry-run, no escribe nada) contra todas las compañías del arreglo
 rake "sap:schema:diff[/ruta/a/connections.json]"
 
 # Aplicar contra todas las compañías del arreglo
 rake "sap:schema:sync[/ruta/a/connections.json]"
 
-# Aplicar un solo schema
+# Aplicar un solo schema, contra todas las compañías del arreglo
 rake "sap:schema:sync_one[log_events,/ruta/a/connections.json]"
 
-# Chequear drift entre config/sap_schemas y el lock (no llama a SAP)
+# Chequear drift entre config/sap_schemas y el lock (no llama a SAP, no recibe connections.json)
 rake sap:schema:check_lock
 
 # Sembrar/consultar filas de prueba en una UDT (plomería; los datos los da el producto)
@@ -162,12 +142,12 @@ rake "sap:test_data:seed[/ruta/a/connections.json,/ruta/a/seed.json]"
 rake "sap:test_data:query[/ruta/a/connections.json,CL_EMA_LOG_EVENTS,U_Event eq 'x']"
 ```
 
-`config/sap_schemas` se resuelve igual que en `SchemaSyncService` (relativo a
+`config/sap_schemas` se resuelve igual en todos los tasks (relativo a
 `Rails.root` si existe Rails, si no relativo al directorio desde donde se corre
 `rake`), overridable con `SAP_SCHEMAS_PATH`. El lock vive por defecto en
 `config/sync.lock` (override con `SAP_SYNC_LOCK_PATH`).
 
-### El lock: todo o nada
+## El lock: todo o nada
 
 `sap:schema:sync` solo escribe/actualiza `sync.lock` si **todas** las
 compañías del arreglo terminaron sin error (ni fallo de conexión, ni un schema
@@ -183,7 +163,7 @@ todo quedó sincronizado cuando en realidad una compañía se quedó atrás.
 - **pending**: tiene archivo de schema pero nunca terminó un `sync_all` 100%
   exitoso en todas las compañías.
 
-### Datos de prueba (`sap:test_data:*`)
+## Datos de prueba (`sap:test_data:*`)
 
 `sap:test_data:seed`/`query` son plomería de acceso a filas de una UDT (con la
 convención `U_` de SAP), independiente del sync de schemas. La herramienta no
@@ -195,18 +175,24 @@ el producto:
 { "table_name": "CL_EMA_LOG_EVENTS", "rows": [ { "Event": "test", "Detail": "..." } ] }
 ```
 
-## Estructura
+## Estructura interna
 
 ```
 lib/clavisco/sap_udfs/
-  schema_sync_service.rb   # Sync engine: JSON → SAP via SL (una conexión)
   connections.rb           # Lee/valida el archivo de conexiones
   client_factory.rb        # connection hash → Clavisco::ServiceLayer::Client
-  multi_company_sync.rb    # Corre SchemaSyncService contra N conexiones
+  multi_company_sync.rb    # Orquesta: recorre el arreglo, corre schema_sync_service por cada entrada
+  schema_sync_service.rb   # Motor de sync/diff contra UNA conexión — pieza interna, no se usa suelta
   lock.rb                  # sync.lock: todo-o-nada + detección de drift
   test_data_helper.rb      # query/insert de filas en UDTs
   rake_support.rb          # Lógica detrás de las rake tasks
 lib/tasks/sap_udfs.rake    # rake sap:schema:* / sap:test_data:*
 ```
+
+`SchemaSyncService` es el motor que sabe construir los `get`/`post`/`patch`
+contra `UserTablesMD`/`UserFieldsMD` para una sola conexión — es la pieza que
+`MultiCompanySync` invoca una vez por cada entrada del arreglo. No es una
+forma alternativa de usar la herramienta: la interfaz soportada es siempre
+las rake tasks + el archivo de conexiones, sea de 1 o N entradas.
 
 Los JSON schemas viven en cada producto: `config/sap_schemas/*.json`
