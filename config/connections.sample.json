@@ -1,0 +1,16 @@
+[
+  {
+    "name": "ACME_PROD",
+    "base_url": "https://sl.example.com:50000/b1s/v1/",
+    "company_db": "ACME_PROD_DB",
+    "username": "manager",
+    "password": "REPLACE_ME"
+  },
+  {
+    "name": "ACME_PROD_2",
+    "base_url": "https://sl.example.com:50000/b1s/v1/",
+    "company_db": "ACME_PROD_DB2",
+    "username": "manager",
+    "password": "REPLACE_ME"
+  }
+]

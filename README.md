@@ -124,6 +124,14 @@ resultados/errores por compañía. Cómo se arma este archivo (a mano hoy, gener
 por un pipeline después) es responsabilidad de quien consume la herramienta —
 acá solo se lee y se valida.
 
+El contrato de ejemplo vive en [`config/connections.sample.json`](config/connections.sample.json)
+(datos ficticios, seguro de commitear — es solo el shape). **El archivo real,
+con credenciales, nunca vive en este submódulo ni se commitea en ningún repo**:
+es específico de cada cliente/branch, así que corresponde al producto (su
+propio `.gitignore`, o mejor aún, un secreto inyectado por el pipeline de
+CI/CD al momento de build/deploy de ese branch) — no al submódulo, que es
+código compartido entre clientes.
+
 ### Rake tasks
 
 Hay que cargar las tasks del submódulo desde el Rakefile del producto:
