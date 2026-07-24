@@ -87,6 +87,10 @@ class MockSLClient
       return metadata ? [metadata] : []
     end
 
+    # Generic UDT data resource (U_-prefixed) — used by TestDataHelper#query.
+    # Tests only assert on the recorded call args, so an empty result is fine.
+    return [] if resource.start_with?("U_")
+
     raise "MockSLClient#get: unexpected resource #{resource.inspect}"
   end
 

@@ -1,3 +1,5 @@
 .DS_Store
 tmp/
 sap-connection.env
+sync.lock
+/connections*.json
