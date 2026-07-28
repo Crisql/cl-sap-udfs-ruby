@@ -17,16 +17,18 @@ module Clavisco
     module RakeSupport
       module_function
 
-      def diff(connections_file)
+      def diff(connections_file, csv_path = nil)
         connections = load_connections(connections_file)
         results = MultiCompanySync.new(connections, schemas_path: schemas_path).diff_all
         print_results("DIFF", results)
+        write_csv(results, csv_path)
       end
 
-      def sync(connections_file)
+      def sync(connections_file, csv_path = nil)
         connections = load_connections(connections_file)
         results = MultiCompanySync.new(connections, schemas_path: schemas_path).sync_all
         print_results("SYNC", results)
+        write_csv(results, csv_path)
 
         if MultiCompanySync.all_ok?(results)
           Lock.new(lock_path, schemas_path).write!(schema_names)
@@ -37,12 +39,13 @@ module Clavisco
         end
       end
 
-      def sync_one(schema_name, connections_file)
+      def sync_one(schema_name, connections_file, csv_path = nil)
         raise "schema_name argument is required, e.g. rake \"sap:schema:sync_one[log_events,/path/to/connections.json]\"" if schema_name.to_s.empty?
 
         connections = load_connections(connections_file)
         results = MultiCompanySync.new(connections, schemas_path: schemas_path).sync_one(schema_name)
         print_results("SYNC ONE (#{schema_name})", results)
+        write_csv(results, csv_path)
         # sync_one only covers a single schema, not the full set — it never
         # touches the lock (which represents the full config/sap_schemas set).
         exit 1 unless MultiCompanySync.all_ok?(results)
@@ -118,6 +121,13 @@ module Clavisco
 
       def lock_path
         ENV["SAP_SYNC_LOCK_PATH"] || File.join(schemas_path, "..", "sync.lock")
+      end
+
+      def write_csv(results, csv_path)
+        return if csv_path.to_s.empty?
+
+        CsvReport.write(results, csv_path)
+        puts "\nCSV escrito: #{csv_path}"
       end
 
       def print_results(title, results)

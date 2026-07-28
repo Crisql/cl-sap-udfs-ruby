@@ -142,6 +142,14 @@ rake "sap:test_data:seed[/ruta/a/connections.json,/ruta/a/seed.json]"
 rake "sap:test_data:query[/ruta/a/connections.json,CL_EMA_LOG_EVENTS,U_Event eq 'x']"
 ```
 
+`diff`, `sync` y `sync_one` aceptan un tercer argumento opcional: la ruta donde
+escribir un reporte en CSV con el resultado (una fila por compañía/schema/campo).
+Si se omite, el comando se comporta igual que antes (solo imprime por consola):
+
+```bash
+rake "sap:schema:sync[/ruta/a/connections.json,/ruta/a/reporte.csv]"
+```
+
 `config/sap_schemas` se resuelve igual en todos los tasks (relativo a
 `Rails.root` si existe Rails, si no relativo al directorio desde donde se corre
 `rake`), overridable con `SAP_SCHEMAS_PATH`. El lock vive por defecto en
@@ -188,6 +196,7 @@ lib/clavisco/sap_udfs/
   multi_company_sync.rb    # Orquesta: recorre el arreglo, corre schema_sync_service por cada entrada
   schema_sync_service.rb   # Motor de sync/diff contra UNA conexión — pieza interna, no se usa suelta
   lock.rb                  # sync.lock: todo-o-nada + detección de drift
+  csv_report.rb            # aplana resultados de sync/diff a filas CSV
   test_data_helper.rb      # query/insert de filas en UDTs
   rake_support.rb          # Lógica detrás de las rake tasks
 lib/tasks/sap_udfs.rake    # rake sap:schema:* / sap:test_data:*

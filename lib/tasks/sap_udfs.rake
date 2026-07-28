@@ -20,19 +20,19 @@ require_relative "../clavisco/sap_udfs"
 
 namespace :sap do
   namespace :schema do
-    desc "Preview UDT/UDF changes across every company in the connections file (dry-run, no writes)"
-    task :diff, [:connections_file] do |_, args|
-      Clavisco::SapUdfs::RakeSupport.diff(args[:connections_file])
+    desc "Preview UDT/UDF changes across every company in the connections file (dry-run, no writes). Optional csv_path writes a CSV report."
+    task :diff, [:connections_file, :csv_path] do |_, args|
+      Clavisco::SapUdfs::RakeSupport.diff(args[:connections_file], args[:csv_path])
     end
 
-    desc "Apply UDT/UDF sync across every company in the connections file"
-    task :sync, [:connections_file] do |_, args|
-      Clavisco::SapUdfs::RakeSupport.sync(args[:connections_file])
+    desc "Apply UDT/UDF sync across every company in the connections file. Optional csv_path writes a CSV report."
+    task :sync, [:connections_file, :csv_path] do |_, args|
+      Clavisco::SapUdfs::RakeSupport.sync(args[:connections_file], args[:csv_path])
     end
 
-    desc "Apply UDT/UDF sync for a single schema, across every company in the connections file"
-    task :sync_one, [:schema_name, :connections_file] do |_, args|
-      Clavisco::SapUdfs::RakeSupport.sync_one(args[:schema_name], args[:connections_file])
+    desc "Apply UDT/UDF sync for a single schema, across every company in the connections file. Optional csv_path writes a CSV report."
+    task :sync_one, [:schema_name, :connections_file, :csv_path] do |_, args|
+      Clavisco::SapUdfs::RakeSupport.sync_one(args[:schema_name], args[:connections_file], args[:csv_path])
     end
 
     desc "Check config/sap_schemas against the sync lock for drift (no SAP calls)"
