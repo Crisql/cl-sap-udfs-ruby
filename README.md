@@ -156,12 +156,16 @@ falló, y el task termina con exit code ≠ 0 — así un pipeline nunca cree qu
 todo quedó sincronizado cuando en realidad una compañía se quedó atrás.
 
 `sap:schema:check_lock` no llama a SAP: compara los archivos actuales en
-`config/sap_schemas` contra lo último registrado en el lock, y reporta:
+`config/sap_schemas` (por contenido, no solo por nombre — cada schema se
+registra con un SHA256 de su contenido) contra lo último registrado en el
+lock, y reporta:
 
 - **stale**: estaba en el lock pero ya no tiene archivo de schema (pudo quedar
   un UDT/UDF huérfano en SAP — revisar a mano).
 - **pending**: tiene archivo de schema pero nunca terminó un `sync_all` 100%
   exitoso en todas las compañías.
+- **changed**: se sincronizó bien antes, pero el archivo fue editado después
+  (mismo nombre, contenido distinto) y todavía no se volvió a correr el sync.
 
 ## Datos de prueba (`sap:test_data:*`)
 

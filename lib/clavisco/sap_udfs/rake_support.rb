@@ -29,7 +29,7 @@ module Clavisco
         print_results("SYNC", results)
 
         if MultiCompanySync.all_ok?(results)
-          Lock.new(lock_path).write!(schema_names)
+          Lock.new(lock_path, schemas_path).write!(schema_names)
           puts "\nLock updated (#{lock_path}) — all #{connections.size} compan#{connections.size == 1 ? 'y' : 'ies'} synced clean."
         else
           puts "\nLock NOT updated — at least one company failed or reported schema errors."
@@ -52,13 +52,14 @@ module Clavisco
       # the lock file left by the last fully-successful sync_all.
       def check_lock
         current = schema_names
-        drift = Lock.new(lock_path).check(current)
+        drift = Lock.new(lock_path, schemas_path).check(current)
 
-        if drift[:stale].empty? && drift[:pending].empty?
+        if drift[:stale].empty? && drift[:pending].empty? && drift[:changed].empty?
           puts "Lock OK — matches current schemas (#{current.size})."
         else
           puts "Stale in lock (schema file no longer exists): #{drift[:stale].join(', ')}" unless drift[:stale].empty?
           puts "Pending (schema exists, never fully synced): #{drift[:pending].join(', ')}" unless drift[:pending].empty?
+          puts "Changed (edited since last successful sync): #{drift[:changed].join(', ')}" unless drift[:changed].empty?
           exit 1
         end
       end
